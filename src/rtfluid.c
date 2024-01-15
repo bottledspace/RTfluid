@@ -91,27 +91,30 @@ static void generateParticles(void)
 {
     params.numParticles = 1000;
 
-    struct Particle *particles = malloc(sizeof(struct Particle)*params.numParticles);
+    struct float3 *pos = malloc(sizeof(float3)*params.numParticles);
     for (int i = 0; i < params.numParticles; i++) {
-        particles[i].x = (2.0*(float)rand()/(float)RAND_MAX)-1.0f;
-        particles[i].y = (2.0*(float)rand()/(float)RAND_MAX)-1.0f;
-        particles[i].z = (2.0*(float)rand()/(float)RAND_MAX)-1.0f+2.0f;
+        pos[i].x = (2.0*(float)rand()/(float)RAND_MAX)-1.0f;
+        pos[i].y = (2.0*(float)rand()/(float)RAND_MAX)-1.0f;
+        pos[i].z = (2.0*(float)rand()/(float)RAND_MAX)-1.0f+2.0f;
     }
     
     aabb = malloc(ALIGN_SIZE(params.numParticles * sizeof(OptixAabb)));
     for (int i = 0; i < params.numParticles; i++) {
-        aabb[i].minX = particles[i].x-PARTICLE_RADIUS;
-        aabb[i].minY = particles[i].y-PARTICLE_RADIUS;
-        aabb[i].minZ = particles[i].z-PARTICLE_RADIUS;
-        aabb[i].maxX = particles[i].x+PARTICLE_RADIUS;
-        aabb[i].maxY = particles[i].y+PARTICLE_RADIUS;
-        aabb[i].maxZ = particles[i].z+PARTICLE_RADIUS;
+        aabb[i].minX = pos[i].x - PARTICLE_RADIUS;
+        aabb[i].minY = pos[i].y - PARTICLE_RADIUS;
+        aabb[i].minZ = pos[i].z - PARTICLE_RADIUS;
+        aabb[i].maxX = pos[i].x + PARTICLE_RADIUS;
+        aabb[i].maxY = pos[i].y + PARTICLE_RADIUS;
+        aabb[i].maxZ = pos[i].z + PARTICLE_RADIUS;
     }
 
-    cudaMalloc((void**)&params.particles, ALIGN_SIZE(sizeof(struct Particle)*params.numParticles));
-    cudaMemcpy(params.particles, particles,
-        sizeof(struct Particle)*params.numParticles, cudaMemcpyHostToDevice);
-    free(particles);
+    cudaMalloc((void**)&params.pos0, ALIGN_SIZE(sizeof(float3)*params.numParticles));
+    cudaMemcpy(params.pos0, pos, sizeof(float3)*params.numParticles, cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&params.pos1, ALIGN_SIZE(sizeof(float3)*params.numParticles));
+    cudaMemcpy(params.pos1, pos, sizeof(float3)*params.numParticles, cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&params.vel, ALIGN_SIZE(sizeof(float3)*params.numParticles));
+    cudaMemset(params.vel, 0, sizeof(float3)*params.numParticles, cudaMemcpyHostToDevice);
+    free(pos);
 }
 
 static void createGAS(void)
@@ -143,7 +146,6 @@ static void createGAS(void)
     CUdeviceptr d_temp_buffer_gas;
     CUDA_CHECK(cudaMalloc((void**)&d_temp_buffer_gas, gas_buffer_sizes.tempSizeInBytes));
 
-    // non-compacted output
     CUdeviceptr d_buffer_temp_output_gas_and_compacted_size;
     size_t      compactedSizeOffset = ALIGN_SIZE(gas_buffer_sizes.outputSizeInBytes);
     CUDA_CHECK(cudaMalloc((void**)&d_buffer_temp_output_gas_and_compacted_size, compactedSizeOffset));
@@ -207,7 +209,7 @@ static void createProgramGroups(void)
     memset(&raygen_prog_group_desc, 0, sizeof(OptixProgramGroupDesc));
     raygen_prog_group_desc.kind                     = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
     raygen_prog_group_desc.raygen.module            = module;
-    raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__rg";
+    raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__draw";
     CUDA_CHECK(optixProgramGroupCreate(context, &raygen_prog_group_desc, 1, &program_group_options,
                             logBuffer, &logSize, &raygen_prog_group));
     
