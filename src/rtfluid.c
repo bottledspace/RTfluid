@@ -39,13 +39,34 @@ struct HitGroupSbtRecord {
     alignas(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
 };
 
-struct Params params;
 extern unsigned char rtfluid_device[];
 extern uint32_t rtfluid_deviceLength;
+
 char logBuffer[2048];
 size_t logSize = 2048;
-OptixDeviceContext context;
-OptixAabb *aabb;
+
+const int width  = 800;
+const int height = 600;
+const int comp   = 4;
+
+struct Params               params;
+OptixDeviceContext          context;
+OptixAabb                  *aabb;
+OptixTraversableHandle      gas_handle;
+CUdeviceptr                 d_gas_output_buffer;
+OptixModule                 module;
+OptixPipelineCompileOptions pipeline_compile_options;
+OptixProgramGroup           raygen_prog_group;
+OptixProgramGroup           miss_prog_group;
+OptixProgramGroup           hitgroup_prog_group;
+OptixPipeline               pipeline;
+OptixShaderBindingTable     sbt;
+GLFWwindow                 *window;
+GLuint                      fbID;
+uint8_t                    *fb;
+cudaGraphicsResource_t      fbRes;
+cudaArray_t                 array;
+
 
 static void context_log_cb(unsigned int level, const char* tag, const char* message, void* cbdata)
 {
@@ -92,10 +113,6 @@ static void generateParticles(void)
         sizeof(struct Particle)*params.numParticles, cudaMemcpyHostToDevice);
     free(particles);
 }
-
-OptixTraversableHandle gas_handle;
-CUdeviceptr            d_gas_output_buffer;
-
 
 static void createGAS(void)
 {
@@ -154,9 +171,6 @@ static void createGAS(void)
     CUDA_CHECK(cudaFree((void*)d_aabb_buffer));
 }
 
-OptixModule module;
-OptixPipelineCompileOptions pipeline_compile_options;
-
 static void createModule(void)
 {
     LOG_FUNCTION();
@@ -172,17 +186,13 @@ static void createModule(void)
     pipeline_compile_options.usesMotionBlur        = 0;
     pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY;
     pipeline_compile_options.numPayloadValues      = 3;
-    pipeline_compile_options.numAttributeValues    = 4; // XXX
-    pipeline_compile_options.exceptionFlags        = OPTIX_EXCEPTION_FLAG_NONE;  // TODO: should be OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW;
+    pipeline_compile_options.numAttributeValues    = 4;
+    pipeline_compile_options.exceptionFlags        = OPTIX_EXCEPTION_FLAG_NONE;
     pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
 
     CUDA_CHECK(optixModuleCreate(context, &module_compile_options, &pipeline_compile_options,
                       rtfluid_device, rtfluid_deviceLength, logBuffer, &logSize, &module));
 }
-
-OptixProgramGroup raygen_prog_group;
-OptixProgramGroup miss_prog_group;
-OptixProgramGroup hitgroup_prog_group;
 
 static void createProgramGroups(void)
 {
@@ -229,8 +239,6 @@ static void createProgramGroups(void)
                             logBuffer, &logSize, &hitgroup_prog_group));
 }
 
-OptixPipeline pipeline;
-
 static void createPipeline(void)
 {
     LOG_FUNCTION();
@@ -262,8 +270,6 @@ static void createPipeline(void)
     CUDA_CHECK(optixPipelineSetStackSize(pipeline, direct_callable_stack_size_from_traversal,
                               direct_callable_stack_size_from_state, continuation_stack_size, 1));
 }
-
-OptixShaderBindingTable sbt;
 
 static void createSBT(void)
 {
@@ -304,16 +310,6 @@ static void createSBT(void)
     sbt.hitgroupRecordStrideInBytes = sizeof(struct HitGroupSbtRecord);
     sbt.hitgroupRecordCount         = 1;
 }
-
-const int width  = 800;
-const int height = 600;
-const int comp   = 4;
-
-GLFWwindow *window;
-GLuint fbID;
-uint8_t *fb;
-cudaGraphicsResource_t fbRes;
-cudaArray_t array;
 
 static void setupGUI(void)
 {
