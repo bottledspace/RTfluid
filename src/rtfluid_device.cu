@@ -1,35 +1,9 @@
 #include "rtfluid.h"
-#include "vec_math.h"
+
 
 __constant__ Params params;
 
-extern "C" __global__ void __raygen__update()
-{
-    const uint3 idx = optixGetLaunchIndex();
-    const uint3 dim = optixGetLaunchDimensions();
-
-    const unsigned id = idx.x + idx.y * dim.x;
-    const float speed = length(params.vel[id]);
- 
-    unsigned p0, p1; // Payload
-    optixTrace(
-            params.gas_handle,
-            params.pos0[id],
-            params.vel[id]*(1.0f/speed),
-            0.0f,
-            speed,
-            0.0f,                // rayTime
-            OptixVisibilityMask(1),
-            OPTIX_RAY_FLAG_DISABLE_ANYHIT, // Only take the closest hit
-            0,                   // SBT offset
-            0,                   // SBT stride
-            0,                   // missSBTIndex
-            p0, p1);
-    
-    params.pos1[id] = params.pos0[id] + (__uint_as_float(p1)/speed)*params.vel[id];
-}
-
-extern "C" __global__ void __raygen__draw()
+extern "C" __global__ void __raygen__rg()
 {
     const uint3 idx = optixGetLaunchIndex();
     const uint3 dim = optixGetLaunchDimensions();
@@ -38,7 +12,7 @@ extern "C" __global__ void __raygen__draw()
 
     const float3 rayOrigin      = make_float3(0.0f, 0.0f, 0.0f);
     const float3 rayDirection   = normalize(d);
-    unsigned p0, p1; // Payload
+    unsigned hit; // Payload
     optixTrace(
             params.gas_handle,
             rayOrigin,
@@ -47,49 +21,47 @@ extern "C" __global__ void __raygen__draw()
             1e9f,
             0.0f,                // rayTime
             OptixVisibilityMask(1),
-            OPTIX_RAY_FLAG_DISABLE_ANYHIT,
+            OPTIX_RAY_FLAG_DISABLE_ANYHIT | OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT,
             0,                   // SBT offset
             0,                   // SBT stride
             0,                   // missSBTIndex
-            p0, p1);
+            hit);
 
     unsigned index = 4*(idx.y*params.image_width+idx.x);
 
-    params.image[index+0] = p0*255;
-    params.image[index+1] = p0*255;
-    params.image[index+2] = p0*255;
+    params.image[index+0] = hit*255;
+    params.image[index+1] = hit*255;
+    params.image[index+2] = hit*255;
     params.image[index+3] = 255;
 }
 
 extern "C" __global__ void __miss__ms()
 {
     optixSetPayload_0(0); // no hits
-    optixSetPayload_1(0);
 }
 
 extern "C" __global__ void __closesthit__ch()
 {
     optixSetPayload_0(1); // yes a hit
-    optixSetPayload_1(__float_as_uint(optixGetRayTmax()));
 }
+
 
 extern "C" __global__ void __intersection__sphere()
 {
-    int id = optixGetPrimitiveIndex();
-    if (id > params.numParticles)
+    const unsigned id = optixGetPrimitiveIndex();
+    if (id >= params.numParticles)
         return;
-
+    
     const float3 rayOrig = optixGetWorldRayOrigin();
     const float3 rayDir  = optixGetWorldRayDirection();
     const float  rayTmin = optixGetRayTmin();
     const float  rayTmax = optixGetRayTmax();
-    const float3 circleCenter = params.pos0[id];
+    const float3 center = params.particles[id].pos;
 
-    const float t = dot(circleCenter - rayOrig, rayDir);
+    const float t = dot(center - rayOrig, rayDir);
     if (t < rayTmin || t > rayTmax)
         return;
-
-    const float3 disp = circleCenter - rayDir * t;
-    if (dot(disp, disp) <= PARTICLE_RADIUS * PARTICLE_RADIUS)
-        optixReportIntersection(t,0,0u,0u);
+    const float3 disp = center - rayDir * t;
+    if (dot(disp, disp) <= PARTICLE_RADIUS*PARTICLE_RADIUS)
+        optixReportIntersection(t, 0u);
 }
