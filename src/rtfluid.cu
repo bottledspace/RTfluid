@@ -63,6 +63,8 @@ const int width  = 800;
 const int height = 600;
 const int comp   = 4;
 
+#define GRID_SIZE 100
+
 struct Params               params;
 OptixDeviceContext          context;
 OptixTraversableHandle      gas_handle;
@@ -124,10 +126,10 @@ __global__ void adjustAABBs(int numParticles, struct Particle *particles, OptixA
 
 __host__ __device__ __forceinline__ static unsigned hashPosition(float3 pos)
 {
-    int xi = 80.0*(pos.x+2.0f)/3.0f;
-    int yi = 80.0*(pos.y+2.0f)/3.0f;
-    int zi = 80.0*((pos.z-2.0f)+2.0f)/3.0f;
-    return clamp(zi,0,80)*80*80 + clamp(yi,0,80)*80 + clamp(xi,0,80);
+    int xi = GRID_SIZE*(pos.x+1.0f)/2.0f;
+    int yi = GRID_SIZE*(pos.y+1.0f)/2.0f;
+    int zi = GRID_SIZE*((pos.z-2.0f)+1.0f)/2.0f;
+    return clamp(zi,1,GRID_SIZE-1)*GRID_SIZE*GRID_SIZE + clamp(yi,1,GRID_SIZE-1)*GRID_SIZE + clamp(xi,1,GRID_SIZE-1);
 }
 
 __global__ void integrateParticle(int numParticles, struct Particle *particles, int *grid)
@@ -139,81 +141,94 @@ __global__ void integrateParticle(int numParticles, struct Particle *particles, 
     struct Particle *particle = &particles[particleIdx];
     if (particle->pos.x > 1.0f) {
         particle->pos.x = 1.0f;
+        //particle->vel.x *= -0.01f;
     }
     if (particle->pos.x < -1.0f) {
         particle->pos.x = -1.0f;
+        //particle->vel.x *= -0.01f;
     }
     if (particle->pos.y > 1.0f) {
         particle->pos.y = 1.0f;
+        //particle->vel.y *= -0.01f;
     }
     if (particle->pos.y < -1.0f) {
         particle->pos.y = -1.0f;
+        //particle->vel.y *= -0.01f;
     }
     if (particle->pos.z > 2.0f+1.0f) {
         particle->pos.z = 2.0f+1.0f;
+        //particle->vel.z *= -0.01f;
     }
     if (particle->pos.z < 2.0f-1.0f) {
         particle->pos.z = 2.0f-1.0f;
+        //particle->vel.z *= -0.01f;
     }
     particle->pos += particle->vel;
+    particle->vel *= 0.9f;
+    particle->vel.y -= 0.01f;
     particle->next = atomicExch(&grid[hashPosition(particle->pos)], particleIdx);
 }
 
 
 
-__global__ void fixCollisions(struct Particle *particles, int *grid)
+__global__ void fixCollisions(struct Particle *particles, int *grid, int step, dim3 offset)
 {
-    const int neighborhoodOffsets[27] = {
-        (-1)*80*80 + (-1)*80 + (-1),
-        (-1)*80*80 + (-1)*80 + ( 0),
-        (-1)*80*80 + (-1)*80 + (+1),
-        (-1)*80*80 + ( 0)*80 + (-1),
-        (-1)*80*80 + ( 0)*80 + ( 0),
-        (-1)*80*80 + ( 0)*80 + (+1),
-        (-1)*80*80 + (+1)*80 + (-1),
-        (-1)*80*80 + (+1)*80 + ( 0),
-        (-1)*80*80 + (+1)*80 + (+1),
-        ( 0)*80*80 + (-1)*80 + (-1),
-        ( 0)*80*80 + (-1)*80 + ( 0),
-        ( 0)*80*80 + (-1)*80 + (+1),
-        ( 0)*80*80 + ( 0)*80 + (-1),
-        ( 0)*80*80 + ( 0)*80 + ( 0),
-        ( 0)*80*80 + ( 0)*80 + (+1),
-        ( 0)*80*80 + (+1)*80 + (-1),
-        ( 0)*80*80 + (+1)*80 + ( 0),
-        ( 0)*80*80 + (+1)*80 + (+1),
-        (+1)*80*80 + (-1)*80 + (-1),
-        (+1)*80*80 + (-1)*80 + ( 0),
-        (+1)*80*80 + (-1)*80 + (+1),
-        (+1)*80*80 + ( 0)*80 + (-1),
-        (+1)*80*80 + ( 0)*80 + ( 0),
-        (+1)*80*80 + ( 0)*80 + (+1),
-        (+1)*80*80 + (+1)*80 + (-1),
-        (+1)*80*80 + (+1)*80 + ( 0),
-        (+1)*80*80 + (+1)*80 + (+1),
+    
+    const int3 neighborhoodOffsets[27] = {
+        make_int3((-1), (-1), (-1)),
+        make_int3((-1), (-1), ( 0)),
+        make_int3((-1), (-1), (+1)),
+        make_int3((-1), ( 0), (-1)),
+        make_int3((-1), ( 0), ( 0)),
+        make_int3((-1), ( 0), (+1)),
+        make_int3((-1), (+1), (-1)),
+        make_int3((-1), (+1), ( 0)),
+        make_int3((-1), (+1), (+1)),
+        make_int3(( 0), (-1), (-1)),
+        make_int3(( 0), (-1), ( 0)),
+        make_int3(( 0), (-1), (+1)),
+        make_int3(( 0), ( 0), (-1)),
+        make_int3(( 0), ( 0), ( 0)),
+        make_int3(( 0), ( 0), (+1)),
+        make_int3(( 0), (+1), (-1)),
+        make_int3(( 0), (+1), ( 0)),
+        make_int3(( 0), (+1), (+1)),
+        make_int3((+1), (-1), (-1)),
+        make_int3((+1), (-1), ( 0)),
+        make_int3((+1), (-1), (+1)),
+        make_int3((+1), ( 0), (-1)),
+        make_int3((+1), ( 0), ( 0)),
+        make_int3((+1), ( 0), (+1)),
+        make_int3((+1), (+1), (-1)),
+        make_int3((+1), (+1), ( 0)),
+        make_int3((+1), (+1), (+1)),
     };
-    const int gridIdx = threadIdx.x + blockDim.x * blockIdx.x;
-    const int zi = (gridIdx/80)/80;
-    const int yi = (gridIdx/80)%80;
-    const int xi = gridIdx%80;
-    if (xi-1 < 0 || xi+1 >= 80
-     || yi-1 < 0 || yi+1 >= 80
-     || zi-1 < 0 || zi+1 >= 80)
+    const int zi = (threadIdx.z+blockIdx.z*blockDim.z)*step+offset.z;
+    const int yi = (threadIdx.y+blockIdx.y*blockDim.y)*step+offset.y;
+    const int xi = (threadIdx.x+blockIdx.x*blockDim.x)*step+offset.x;
+    if (xi >= GRID_SIZE || yi >= GRID_SIZE || zi >= GRID_SIZE)
         return;
 
-    int tally = 0;
-    for (int offsetIdx2 = 0; offsetIdx2 < 27; offsetIdx2++)
-    for (int particleIdx2 = grid[neighborhoodOffsets[offsetIdx2]+gridIdx]; particleIdx2 != -1; particleIdx2 = particles[particleIdx2].next)
-    for (int particleIdx1 = grid[                                gridIdx]; particleIdx1 != -1; particleIdx1 = particles[particleIdx1].next) {
-        if (particleIdx1 == particleIdx2)
+    const int gridIdx1 = GRID_SIZE*GRID_SIZE*zi + GRID_SIZE*yi + xi;
+    for (int offsetIdx2 = 0; offsetIdx2 < 27; offsetIdx2++) {
+        int3 neighborhoodOffset = neighborhoodOffsets[offsetIdx2];
+        if (neighborhoodOffset.x+xi < 0 || neighborhoodOffset.x+xi >= GRID_SIZE
+         || neighborhoodOffset.y+yi < 0 || neighborhoodOffset.y+yi >= GRID_SIZE
+         || neighborhoodOffset.z+zi < 0 || neighborhoodOffset.z+zi >= GRID_SIZE)
             continue;
-        
-        float3 disp = particles[particleIdx1].pos - particles[particleIdx2].pos;
-        float dist2 = dot(disp, disp);
-        if (dist2 < 4.0f*PARTICLE_RADIUS*PARTICLE_RADIUS) {
-            float dist = sqrtf(dist2);
-            particles[particleIdx1].pos += 0.01*PARTICLE_RADIUS*disp/dist;
-            //particles[particleIdx2].pos += PARTICLE_RADIUS*disp/dist;
+        int gridIdx2 = gridIdx1 + neighborhoodOffset.x + neighborhoodOffset.y*GRID_SIZE + neighborhoodOffset.z*GRID_SIZE*GRID_SIZE;
+        for (int particleIdx2 = grid[gridIdx2]; particleIdx2 != -1; particleIdx2 = particles[particleIdx2].next)
+        for (int particleIdx1 = grid[gridIdx1]; particleIdx1 != -1; particleIdx1 = particles[particleIdx1].next) {
+            if (particleIdx1 == particleIdx2)
+                continue;
+            
+            float3 disp = particles[particleIdx1].pos - particles[particleIdx2].pos;
+            float dist2 = dot(disp, disp);
+            if (dist2 < 4.0f*(PARTICLE_RADIUS)*(PARTICLE_RADIUS)) {
+                float dist = sqrtf(dist2);
+                particles[particleIdx1].vel += 0.1f*(PARTICLE_RADIUS)*disp/dist;
+                //particles[particleIdx2].vel -= 0.1f*(PARTICLE_RADIUS)*disp/dist;    
+            }
         }
     }
 }
@@ -222,25 +237,25 @@ static void generateParticles(void)
 {
     params.numParticles = 102400;
 
-    CUDA_CHECK(cudaMalloc((void**)&params.particles, ALIGN_SIZE(sizeof(struct Particle)*params.numParticles)));    
+    CUDA_CHECK(cudaMallocManaged((void**)&params.particles, ALIGN_SIZE(sizeof(struct Particle)*params.numParticles)));    
     
-    struct Particle *particles = (struct Particle*)malloc(sizeof(struct Particle)*params.numParticles);
+    //struct Particle *particles = (struct Particle*)malloc(sizeof(struct Particle)*params.numParticles);
     for (int i = 0; i < params.numParticles; i++) {
-        particles[i].pos.x = (2.0*(float)rand()/(float)RAND_MAX)-1.0f;
-        particles[i].pos.y = (2.0*(float)rand()/(float)RAND_MAX)-1.0f;
-        particles[i].pos.z = (2.0*(float)rand()/(float)RAND_MAX)-1.0f+2.0f;
+        params.particles[i].pos.x = 0.5*((2.0*(float)rand()/(float)RAND_MAX)-1.0f);
+        params.particles[i].pos.y = 0.5*((2.0*(float)rand()/(float)RAND_MAX)-1.0f);
+        params.particles[i].pos.z = 0.5*((2.0*(float)rand()/(float)RAND_MAX)-1.0f)+2.0f;
 
-        particles[i].vel.x = 0.0;   //1f*((2.0*(float)rand()/(float)RAND_MAX)-1.0f);
-        particles[i].vel.y = -0.01; //1f*((2.0*(float)rand()/(float)RAND_MAX)-1.0f);
-        particles[i].vel.z = 0.0;   //1f*((2.0*(float)rand()/(float)RAND_MAX)-1.0f);
+        params.particles[i].vel.x =  0.00; //1f*((2.0*(float)rand()/(float)RAND_MAX)-1.0f);
+        params.particles[i].vel.y = -0.01; //1f*((2.0*(float)rand()/(float)RAND_MAX)-1.0f);
+        params.particles[i].vel.z =  0.00; //1f*((2.0*(float)rand()/(float)RAND_MAX)-1.0f);
     }
-    CUDA_CHECK(cudaMemcpy(params.particles, particles, sizeof(struct Particle)*params.numParticles, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMalloc((void**)&params.grid, 80*80*80*sizeof(int)));
-    CUDA_CHECK(cudaMemset(params.grid, -1, 80*80*80*sizeof(int)));
+    //CUDA_CHECK(cudaMemcpy(params.particles, particles, sizeof(struct Particle)*params.numParticles, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMallocManaged((void**)&params.grid, GRID_SIZE*GRID_SIZE*GRID_SIZE*sizeof(int)));
+    CUDA_CHECK(cudaMemset(params.grid, -1, GRID_SIZE*GRID_SIZE*GRID_SIZE*sizeof(int)));
     CUDA_CHECK(cudaMalloc((void**)&aabbBuffer, ALIGN_SIZE(params.numParticles*sizeof(OptixAabb))));
     adjustAABBs<<<params.numParticles/128, 128>>>(params.numParticles, params.particles, aabbBuffer);
     
-    free(particles);
+    //free(particles);
 }
 
 static void recreateGAS(OptixBuildOperation operation)
@@ -480,8 +495,100 @@ static void launch(void)
     QueryPerformanceCounter(&t1);
 
     integrateParticle<<<params.numParticles/128, 128>>>(params.numParticles, params.particles, params.grid);
-    fixCollisions<<<80*80*80/512, 512>>>(params.particles, params.grid);
-    CUDA_CHECK(cudaMemset(params.grid, -1, 80*80*80*sizeof(int)));
+
+#if 1
+// Parallel spatial hashing
+    fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 1, dim3(0,0,0));
+
+    /*fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 2, dim3(0,0,1));
+    fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 2, dim3(1,0,0));
+
+    fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 2, dim3(0,0,0));
+    fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 2, dim3(1,1,1));
+
+
+    fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 2, dim3(0,1,1));
+    fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 2, dim3(1,1,0));
+
+    fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 2, dim3(0,1,0));
+    fixCollisions<<<dim3(GRID_SIZE/8,GRID_SIZE/8,GRID_SIZE/8), dim3(8,8,8)>>>(params.particles, params.grid, 2, dim3(1,0,1));*/
+#endif
+
+#if 0
+// Serial spatial hashing (slow) for comparison
+    {
+        CUDA_CHECK(cudaDeviceSynchronize());
+
+        const int neighborhoodOffsets[27] = {
+            (-1)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + (-1),
+            (-1)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + ( 0),
+            (-1)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + (+1),
+            (-1)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + (-1),
+            (-1)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + ( 0),
+            (-1)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + (+1),
+            (-1)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + (-1),
+            (-1)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + ( 0),
+            (-1)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + (+1),
+            ( 0)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + (-1),
+            ( 0)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + ( 0),
+            ( 0)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + (+1),
+            ( 0)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + (-1),
+            ( 0)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + ( 0),
+            ( 0)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + (+1),
+            ( 0)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + (-1),
+            ( 0)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + ( 0),
+            ( 0)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + (+1),
+            (+1)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + (-1),
+            (+1)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + ( 0),
+            (+1)*GRID_SIZE*GRID_SIZE + (-1)*GRID_SIZE + (+1),
+            (+1)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + (-1),
+            (+1)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + ( 0),
+            (+1)*GRID_SIZE*GRID_SIZE + ( 0)*GRID_SIZE + (+1),
+            (+1)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + (-1),
+            (+1)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + ( 0),
+            (+1)*GRID_SIZE*GRID_SIZE + (+1)*GRID_SIZE + (+1),
+        };
+
+        for (int zi = 1; zi < GRID_SIZE-1; zi++)
+        for (int yi = 1; yi < GRID_SIZE-1; yi++)
+        for (int xi = 1; xi < GRID_SIZE-1; xi++) {
+            const int gridIdx = xi+yi*GRID_SIZE+zi*GRID_SIZE*GRID_SIZE;
+
+            for (int offsetIdx2 = 0; offsetIdx2 < 27; offsetIdx2++)
+            for (int particleIdx2 = params.grid[neighborhoodOffsets[offsetIdx2]+gridIdx]; particleIdx2 != -1; particleIdx2 = params.particles[particleIdx2].next)
+            for (int particleIdx1 = params.grid[                                gridIdx]; particleIdx1 != -1; particleIdx1 = params.particles[particleIdx1].next) {
+                if (particleIdx1 == particleIdx2)
+                    continue;
+                
+                float3 disp = params.particles[particleIdx1].pos - params.particles[particleIdx2].pos;
+                float dist2 = dot(disp, disp);
+                if (dist2 < 4.0f*(PARTICLE_RADIUS)*(PARTICLE_RADIUS)) {
+                    float dist = sqrtf(dist2);
+                    params.particles[particleIdx1].pos += 0.1f*(PARTICLE_RADIUS)*disp/dist;
+                    params.particles[particleIdx2].pos -= 0.1f*(PARTICLE_RADIUS)*disp/dist;
+                }
+            }
+        }
+    }
+#endif
+
+#if 0
+// Naiive (very slow) collision response for comparison
+    CUDA_CHECK(cudaDeviceSynchronize());
+    for (int particleIdx2 = 0; particleIdx2 < params.numParticles; particleIdx2++)
+    for (int particleIdx1 = particleIdx2+1; particleIdx1 < params.numParticles; particleIdx1++) {
+        
+        float3 disp = params.particles[particleIdx1].pos - params.particles[particleIdx2].pos;
+        float dist2 = dot(disp, disp);
+        if (dist2 < 4.0f*(PARTICLE_RADIUS)*(PARTICLE_RADIUS)) {
+            float dist = sqrtf(dist2);
+            params.particles[particleIdx1].pos += 0.01f*(PARTICLE_RADIUS)*disp/dist;
+            params.particles[particleIdx2].pos -= 0.01f*(PARTICLE_RADIUS)*disp/dist;
+        }
+    }
+#endif 
+
+    CUDA_CHECK(cudaMemset(params.grid, -1, GRID_SIZE*GRID_SIZE*GRID_SIZE*sizeof(int)));
     CUDA_CHECK(cudaDeviceSynchronize());
     QueryPerformanceCounter(&t2);
     fprintf(stderr, "update: %lf\n", (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart);
@@ -500,8 +607,6 @@ static void launch(void)
     CUDA_CHECK(cudaDeviceSynchronize());
     QueryPerformanceCounter(&t2);
     fprintf(stderr, "rebuild: %lf\n", (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart);
-
-
 }
 
 static void teardownOptix(void)

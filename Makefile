@@ -11,7 +11,7 @@ BIN2C := "/mnt/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3/bin/bin2c
 
 CC := "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe"
 
-build/rtfluid_device_ptx.ptx : src/rtfluid_device.cu | build
+build/rtfluid_device_ptx.ptx : src/rtfluid_device.cu src/rtfluid.h | build
 	$(NVCC) -Xptxas -O3,-v -dlink -ptx -ccbin $(CC) \
 		--compiler-options "/std:c11" -o build/rtfluid_device_ptx.ptx \
 		-I $(OPTIX_INCLUDE) src/rtfluid_device.cu
@@ -21,8 +21,8 @@ build/rtfluid_device_ptx.cu : build/rtfluid_device_ptx.ptx | build
 		"$$($(BIN2C) --name rtfluid_device --length --stdint build/rtfluid_device_ptx.ptx)" \
 		>build/rtfluid_device_ptx.cu
 
-build/rtfluid : src/rtfluid.cu build/rtfluid_device_ptx.cu | build
-	$(NVCC) -Xptxas -O3,-v -ccbin $(CC) --compiler-options "/std:c11" -o build/rtfluid \
+build/rtfluid : src/rtfluid.cu build/rtfluid_device_ptx.cu src/rtfluid.h | build
+	$(NVCC) -Xptxas -O3,-v -ccbin $(CC) --compiler-options "/std:c11 /openmp:experimental /O2" -o build/rtfluid \
 		-I $(OPTIX_INCLUDE) -I $(GLFW_INCLUDE) src/rtfluid.cu \
 		-L $(CUDA_LIB) -L $(GLFW_LIB) -lcuda -lcudart -lnvrtc -lAdvapi32 -lglfw3_mt \
 		-lOpenGL32 -lGDI32 -lKernel32 -lUser32 -lShell32

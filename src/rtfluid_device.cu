@@ -52,6 +52,8 @@ extern "C" __global__ void __intersection__sphere()
     if (id >= params.numParticles)
         return;
     
+
+
     const float3 rayOrig = optixGetWorldRayOrigin();
     const float3 rayDir  = optixGetWorldRayDirection();
     const float  rayTmin = optixGetRayTmin();
